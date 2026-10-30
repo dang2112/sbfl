@@ -10,6 +10,7 @@ from typing import Sequence
 
 from sbfl.io import load_json, write_json
 from sbfl.ochiai import rank_functions
+from sbfl.timeout import positive_seconds
 
 
 DEFAULT_EVIDENCE = Path(".sbfl/test_evidence.json")
@@ -23,12 +24,13 @@ def _strip_remainder_separator(args: Sequence[str]) -> list[str]:
     return args
 
 
-def collect(source_root: str, output: Path, pytest_args: Sequence[str], exclude_internet: bool = False) -> int:
+def collect(source_root: str, output: Path, pytest_args: Sequence[str], exclude_internet: bool = False, test_timeout: float | None = None) -> int:
     pytest_args = _strip_remainder_separator(pytest_args)
     if not pytest_args:
         pytest_args = ["tests/demo", "-q"]
 
     env = os.environ.copy()
+    env["SBFL_TEST_TIMEOUT"] = str(test_timeout) if test_timeout is not None else ""
     env["SBFL_EXCLUDE_INTERNET"] = "1" if exclude_internet else "0"
     env["SBFL_SOURCE_ROOT"] = str(Path(source_root).resolve())
     env["SBFL_OUTPUT"] = str(output.resolve())
@@ -148,6 +150,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     collect_parser = subparsers.add_parser("collect", help="Run pytest with the SBFL trace plugin")
     collect_parser.add_argument("--exclude-internet", action="store_true")
+    collect_parser.add_argument("--test-timeout", type=positive_seconds,
+                            help="Skip Python test bodies exceeding SECONDS (cooperative).", metavar="SECONDS")
     collect_parser.add_argument("--source-root", default="src/shopping")
     collect_parser.add_argument("--output", type=Path, default=DEFAULT_EVIDENCE)
     collect_parser.add_argument("pytest_args", nargs=argparse.REMAINDER)
@@ -158,6 +162,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     run_parser = subparsers.add_parser("run", help="Collect evidence then compute Ochiai ranking")
     run_parser.add_argument("--exclude-internet", action="store_true")
+    run_parser.add_argument("--test-timeout", type=positive_seconds,
+                            help="Skip Python test bodies exceeding SECONDS (cooperative).", metavar="SECONDS")
     run_parser.add_argument("--source-root", default="src/shopping")
     run_parser.add_argument("--evidence", type=Path, default=DEFAULT_EVIDENCE)
     run_parser.add_argument("--output", type=Path, default=DEFAULT_RANKING)
@@ -177,11 +183,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
 
     if args.command == "collect":
-        return collect(args.source_root, args.output, args.pytest_args, args.exclude_internet)
+        return collect(args.source_root, args.output, args.pytest_args, args.exclude_internet, args.test_timeout)
     if args.command == "rank":
         return rank(args.evidence, args.output)
     if args.command == "run":
-        result = collect(args.source_root, args.evidence, args.pytest_args, args.exclude_internet)
+        result = collect(args.source_root, args.evidence, args.pytest_args, args.exclude_internet, args.test_timeout)
         if result != 0:
             return result
         return rank(args.evidence, args.output)

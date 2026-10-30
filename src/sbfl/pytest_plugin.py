@@ -10,6 +10,7 @@ import pytest
 from sbfl.model import TestEvidence
 from sbfl.trace import FunctionTraceRecorder
 from sbfl.network import NetworkGuard
+from sbfl.timeout import TestDeadline, positive_seconds
 
 
 _SESSIONS: dict[str, TestEvidence] = {}
@@ -26,6 +27,9 @@ _KNOWN_NETWORK_TESTS: set[str] = set()
 
 def pytest_addoption(parser: pytest.Parser) -> None:
     group = parser.getgroup("sbfl")
+    group.addoption("--sbfl-test-timeout", type=positive_seconds,
+                    default=os.environ.get("SBFL_TEST_TIMEOUT") or None,
+                    help="Cooperative Python test-body deadline in seconds.")
     group.addoption("--sbfl-exclude-internet", action="store_true",
                     default=os.environ.get("SBFL_EXCLUDE_INTERNET") == "1")
     group.addoption("--sbfl-network-exclusions", default=None,
@@ -114,12 +118,17 @@ def pytest_runtest_call(item: pytest.Item):
     _ACTIVE_RECORDERS[item.nodeid] = recorder
 
     previous_trace = sys.gettrace()
-    sys.settrace(recorder.trace)
+    seconds = item.config.getoption("--sbfl-test-timeout")
+    deadline = TestDeadline(float(seconds), recorder) if seconds is not None else None
+    sys.settrace(deadline.trace if deadline else recorder.trace)
     try:
         yield
     finally:
         sys.settrace(previous_trace)
         evidence = recorder.finish()
+        if deadline and deadline.expired:
+            evidence.excluded_from_ranking = True
+            evidence.exclusion_reason = "test_timeout"
         _SESSIONS[item.nodeid] = evidence
         _ACTIVE_RECORDERS.pop(item.nodeid, None)
 

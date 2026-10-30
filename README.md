@@ -133,6 +133,27 @@ sbfl trace "tests/demo/test_discount.py::test_loyalty_discount_boundary_1000"
 
 ## Ochiai
 
+### Excluding slow test bodies
+
+```bash
+sbfl run --exclude-internet --test-timeout 30 --source-root path/to/package -- tests -q
+```
+
+`--test-timeout SECONDS` is optional and accepts a finite positive number.
+It measures elapsed wall time in each test's call phase, including SBFL tracing
+overhead. At the next Python trace event after the deadline, SBFL skips the test
+and records `excluded_from_ranking: true` with `exclusion_reason: "test_timeout"`.
+It contributes no coverage or counts to ranking; the suite continues. Slow tests
+are not added to the internet exclusion cache and are retried on future runs.
+A timeout is an exclusion policy, not evidence that a test is irrelevant or buggy.
+
+This is a cooperative Python deadline suitable for long nested loops, not a hard
+process timeout. It does not time fixture setup/teardown or test collection, and
+cannot interrupt sleep, blocked I/O, or native code until Python execution resumes.
+Code that replaces tracing or catches `BaseException` can defeat it. A strict
+wall-clock bound on all operations would require process isolation.
+For direct pytest use, pass `--sbfl-test-timeout SECONDS` with the SBFL plugin.
+
 ### Excluding internet-dependent tests
 
 Enable the Python socket guard when collecting evidence:
