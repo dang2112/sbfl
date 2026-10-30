@@ -38,7 +38,9 @@ class SuspiciousnessResult:
 
 
 def rank_functions(test_records: Iterable[dict[str, object]]) -> list[SuspiciousnessResult]:
-    records = list(test_records)
+    records = [record for record in test_records
+               if not record.get("excluded_from_ranking")
+               and record.get("outcome") in {"passed", "failed"}]
     failing = [record for record in records if record.get("outcome") == "failed"]
     passing = [record for record in records if record.get("outcome") == "passed"]
     total_failing = len(failing)

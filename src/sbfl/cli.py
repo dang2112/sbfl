@@ -23,12 +23,13 @@ def _strip_remainder_separator(args: Sequence[str]) -> list[str]:
     return args
 
 
-def collect(source_root: str, output: Path, pytest_args: Sequence[str]) -> int:
+def collect(source_root: str, output: Path, pytest_args: Sequence[str], exclude_internet: bool = False) -> int:
     pytest_args = _strip_remainder_separator(pytest_args)
     if not pytest_args:
         pytest_args = ["tests/demo", "-q"]
 
     env = os.environ.copy()
+    env["SBFL_EXCLUDE_INTERNET"] = "1" if exclude_internet else "0"
     env["SBFL_SOURCE_ROOT"] = str(Path(source_root).resolve())
     env["SBFL_OUTPUT"] = str(output.resolve())
 
@@ -50,6 +51,8 @@ def collect(source_root: str, output: Path, pytest_args: Sequence[str]) -> int:
 
     payload = load_json(output)
     tests = payload.get("tests", [])
+    excluded = sum(bool(test.get("excluded_from_ranking")) for test in tests)
+    print(f"[sbfl] excluded from ranking: {excluded}")
     passed = sum(test.get("outcome") == "passed" for test in tests)
     failed = sum(test.get("outcome") == "failed" for test in tests)
     setup_failed = sum(test.get("outcome") == "setup_failed" for test in tests)
@@ -64,9 +67,14 @@ def collect(source_root: str, output: Path, pytest_args: Sequence[str]) -> int:
 
 def rank(evidence_path: Path, output: Path) -> int:
     payload = load_json(evidence_path)
-    tests = payload.get("tests", [])
+    recorded = payload.get("tests", [])
+    tests = [test for test in recorded if not test.get("excluded_from_ranking")
+             and test.get("outcome") in {"passed", "failed"}]
     failing_count = sum(test.get("outcome") == "failed" for test in tests)
     if failing_count == 0:
+        write_json(output, {"schema_version": 1, "total_tests": len(tests),
+                            "total_failing": 0, "ranking": [],
+                            "status": "no_eligible_failures"})
         print("[sbfl] No failing call-phase tests were recorded; Ochiai cannot localize a fault.")
         return 2
 
@@ -75,6 +83,7 @@ def rank(evidence_path: Path, output: Path) -> int:
         "schema_version": 1,
         "evidence_file": str(evidence_path),
         "total_tests": len(tests),
+        "excluded_tests": sum(bool(t.get("excluded_from_ranking")) for t in recorded),
         "total_failing": failing_count,
         "ranking": [item.to_dict() for item in results],
     }
@@ -138,6 +147,7 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     collect_parser = subparsers.add_parser("collect", help="Run pytest with the SBFL trace plugin")
+    collect_parser.add_argument("--exclude-internet", action="store_true")
     collect_parser.add_argument("--source-root", default="src/shopping")
     collect_parser.add_argument("--output", type=Path, default=DEFAULT_EVIDENCE)
     collect_parser.add_argument("pytest_args", nargs=argparse.REMAINDER)
@@ -147,6 +157,7 @@ def build_parser() -> argparse.ArgumentParser:
     rank_parser.add_argument("--output", type=Path, default=DEFAULT_RANKING)
 
     run_parser = subparsers.add_parser("run", help="Collect evidence then compute Ochiai ranking")
+    run_parser.add_argument("--exclude-internet", action="store_true")
     run_parser.add_argument("--source-root", default="src/shopping")
     run_parser.add_argument("--evidence", type=Path, default=DEFAULT_EVIDENCE)
     run_parser.add_argument("--output", type=Path, default=DEFAULT_RANKING)
@@ -166,11 +177,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
 
     if args.command == "collect":
-        return collect(args.source_root, args.output, args.pytest_args)
+        return collect(args.source_root, args.output, args.pytest_args, args.exclude_internet)
     if args.command == "rank":
         return rank(args.evidence, args.output)
     if args.command == "run":
-        result = collect(args.source_root, args.evidence, args.pytest_args)
+        result = collect(args.source_root, args.evidence, args.pytest_args, args.exclude_internet)
         if result != 0:
             return result
         return rank(args.evidence, args.output)

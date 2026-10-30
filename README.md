@@ -22,11 +22,41 @@ tests/
 
 ## Setup
 
+Requires Python 3.10 or newer. Run these commands from the repository root.
+
+### Windows (PowerShell)
+
+```powershell
+cd E:\sbfl
+py -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -e .
+.\.venv\Scripts\sbfl.exe --help
+```
+
+Replace `E:\sbfl` with your checkout's path. If `.venv` already exists and its
+Python works, skip creating it. If `py` is unavailable, use `python` instead.
+The editable install installs pytest and creates the `sbfl` command.
+
+These commands do not require activation or a PowerShell execution-policy change.
+To use the shorter commands in the rest of this README, optionally activate with:
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+```
+
+If activation is blocked, keep using the explicit executable paths:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest tests/unit -q
+.\.venv\Scripts\sbfl.exe run --source-root src/shopping -- tests/demo -q
+```
+
+### Linux/macOS
+
 ```bash
-python -m venv .venv
-# Windows: .venv\\Scripts\\activate
-# Linux/macOS: source .venv/bin/activate
-pip install -e .
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e .
 ```
 
 ## 1. Confirm the demo bug
@@ -102,6 +132,44 @@ sbfl trace "tests/demo/test_discount.py::test_loyalty_discount_boundary_1000"
 ```
 
 ## Ochiai
+
+### Excluding internet-dependent tests
+
+Enable the Python socket guard when collecting evidence:
+
+```bash
+sbfl run --exclude-internet --source-root path/to/package -- tests -q
+```
+
+Known internet tests can use `@pytest.mark.requires_internet`; in this mode
+they are skipped before setup. Otherwise, external DNS lookups, TCP connections,
+and UDP sends are blocked during test setup, execution, and teardown. A detected
+attempt raises a pytest skip outcome immediately, bypassing ordinary `OSError`
+and `Exception` handlers and their retry loops. The test is excluded from ranking.
+Loopback addresses and `localhost` remain allowed. Mocked calls that never reach
+sockets remain eligible.
+
+Evidence retains excluded test IDs, reasons, and detected destinations for audit.
+Excluded tests contribute no coverage or passing/failing counts to Ochiai.
+When fixture setup attempts external access, all tests using that fixture name
+are conservatively excluded, including consumers of cached shared fixtures.
+This may over-exclude unrelated fixtures with the same name.
+
+Discovered and marked test IDs are saved automatically to `network-exclusions.json`
+beside the evidence JSON. With `--exclude-internet`, subsequent runs skip these
+tests before fixture setup and tracing. Entries are scoped by pytest project root
+and application source root; use consistent roots across runs. Delete the file
+or remove an entry to rediscover a test after fixing it. You can override the file
+by passing `--sbfl-network-exclusions PATH` after the CLI's `--` separator.
+Existing evidence files are not automatically imported into this list.
+
+This is runtime detection, not proof that remaining tests never need internet.
+Import-time networking, subprocess/native networking, previously captured socket
+functions, and unexecuted branches are not covered. A bare `except:` or an explicit
+`except BaseException` can still catch pytest's skip outcome. Shared-fixture teardown
+attempts are attributed to the test performing teardown. For these cases, mark
+known dependent tests explicitly. This mode does not fix project environment or
+dependency incompatibilities.
 
 For function `f`:
 
